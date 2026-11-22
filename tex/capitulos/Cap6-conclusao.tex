@@ -1,2 +1,32 @@
 \chapter{CONCLUSÃO}
 \label{chap:conclusao}
+
+Esta dissertação apresentou a arquitetura \nome\ (\textit{Slice-aware Polynomial Key-based Architecture}), uma extensão do roteamento na origem \polka\ concebida para viabilizar o fatiamento de redes (\textit{network slicing}) e o provisionamento granular de Qualidade de Serviço (QoS) em redes cientes de caminho (\textit{Path-Aware Networks}), preservando um plano de dados totalmente sem estados (\textit{stateless}) no núcleo da rede.
+
+% ==============================================================================
+\section{Síntese das Contribuições e Alcance dos Objetivos}
+\label{sec:sintese_contribuicoes}
+
+A motivação central deste trabalho partiu da limitação de que, embora o roteamento na origem baseado em aritmética polinomial sobre $GF(2)$ elimine tabelas de estado no núcleo, a seleção exclusiva de trajetórias (\textit{path steering}) mostra-se insuficiente para assegurar Acordos de Nível de Serviço (SLAs) quando múltiplas fatias heterogêneas compartilham os mesmos enlaces físicos. Ao longo da pesquisa, todos os objetivos específicos estabelecidos no Capítulo~\ref{chap:introducao} foram integralmente atendidos:
+
+\begin{enumerate}
+    \item \textbf{Modelagem matemática e decodificação unificada de rota e fila:} estendeu-se a formulação do Teorema Chinês dos Restos (CRT) polinomial para codificar, em um único rótulo fixo e imutável (\routeID) inserido na borda da rede, tanto a interface física de egresso (\portID) quanto o identificador da fila de escalonamento (\qID) em cada salto. Mediante o fatiamento de bits (\textit{bit-slicing}) do resíduo calculado localmente pelos comutadores de núcleo, cada nó intermediário extrai simultaneamente o encaminhamento e a classe de serviço sem consultar tabelas por fluxo.
+    \item \textbf{Superação de limitações de escalonamento e portabilidade multiplataforma:} desenvolveu-se e validou-se uma estratégia incremental em três protótipos complementares, abrangendo hardware programável Intel Tofino/\texttt{freeRtr} no \textit{testbed} nacional PORVIR (Protótipo~1), emulação comportamental em $\text{P4}_{16}$/BMv2 acoplada a um gerenciador de tráfego customizado em C++ com algoritmo \textit{Weighted Deficit Round-Robin} (WDRR) (Protótipo~2) e virtualização em contêineres Ubuntu~24.04 via \textit{Containerlab} com plano de dados acelerado em eBPF/XDP integrado ao subsistema nativo \textit{Traffic Control} (\texttt{tc}) do \textit{kernel} Linux (Protótipo~3).
+    \item \textbf{Flexibilidade de classificação na borda:} demonstrou-se que a inteligência de mapeamento de fatias permanece inteiramente concentrada na borda de ingresso, suportando diferentes chaves de classificação --- como o endereço IPv4 de origem no Protótipo~2 e o campo DSCP via mapas \textit{LPM Trie} em eBPF no Protótipo~3 --- sem exigir modificações estruturais nos dispositivos de núcleo.
+    \item \textbf{Comprovação empírica de isolamento, previsibilidade de latência e agilidade de migração:} os resultados experimentais no \textit{testbed} PORVIR atestaram a recuperação imediata de vazão (38,61~Gbit/s) por meio da migração dinâmica de rotas na borda. No ambiente P4/BMv2, o \nome\ comprovou o isolamento estrito de largura de banda (70\%/30\%) e a reconfiguração ágil e simultânea de filas e caminhos sem inanição (\textit{starvation}) das classes secundárias. Por fim, no protótipo em eBPF/XDP a 1~Gbit/s, o escalonamento híbrido SP-WDRR reduziu o atraso médio de enfileiramento das classes críticas em mais de 80\% em relação ao regime FIFO (com o 95º percentil mantido abaixo de 9,5~ms), enquanto a avaliação comparativa entre CUBIC e BBRv1 evidenciou a estabilidade de vazão proporcionada pelo controle baseado em modelo e o compromisso associado à taxa de retransmissões TCP.
+\end{enumerate}
+
+Dessa forma, confirma-se a hipótese de que a unificação entre roteamento na origem sem estado no núcleo e escalonamento programável ponderado oferece uma alternativa escalável, ágil e de baixa sobrecarga de controle para o fatiamento de redes cientes de caminho.
+
+% ==============================================================================
+\section{Limitações e Trabalhos Futuros}
+\label{sec:trabalhos_futuros}
+
+Embora os protótipos desenvolvidos tenham validado a viabilidade funcional e o desempenho da arquitetura \nome, algumas oportunidades de aprimoramento e investigação permanecem abertas para pesquisas futuras:
+
+\begin{itemize}
+    \item \textbf{Implantação nativa do \nome\ em ASICs programáveis de alta velocidade:} como o plano de controle \texttt{freeRtr} ainda não contemplava nativamente as extensões de cabeçalho e o particionamento de bits para seleção de filas no hardware Tofino durante a execução deste trabalho, um passo natural consiste em portar o código $\text{P4}_{16}$ completo do \nome\ para comutadores Intel Tofino físicos, explorando os motores nativos de CRC-16 e o gerenciador de tráfego (\textit{Traffic Manager}) em hardware a taxas de 10~Gbit/s a 100~Gbit/s.
+    \item \textbf{Integração com planos de controle inteligentes e telemetria em banda:} o plano de controle utilizado nos ensaios operou com políticas reativas pré-programadas para validar os tempos de transição e o isolamento de recursos. Trabalhos futuros podem integrar o \nome\ a mecanismos de Telemetria em Banda (\textit{In-band Network Telemetry} -- INT) e agentes de Aprendizado de Máquina, permitindo que o controlador sintetize automaticamente novos rótulos \routeID\ e reajuste pesos de fila diante de anomalias ou degradação de SLA em tempo real.
+    \item \textbf{Suporte nativo a cabeçalhos 5G/6G e \textit{offload} em SmartNICs:} no plano de borda, pretende-se expandir a classificação para inspecionar diretamente parâmetros S-NSSAI (SST e SD) do plano de transporte 5G/6G e encapsulamentos GTP-U, bem como avaliar a execução dos programas eBPF/XDP em modo \textit{hardware offload} sobre placas de rede programáveis (SmartNICs) para reduzir ainda mais o consumo de CPU nos nós de borda e núcleo.
+    \item \textbf{Investigação de versões recentes do BBR e gerenciamento ativo de filas (AQM):} diante do aumento expressivo de retransmissões observado com o BBRv1 sob escalonamento SP-WDRR no Protótipo~3, recomenda-se avaliar o comportamento do algoritmo BBRv3 (que incorpora maior sensibilidade a perdas e sinais ECN) combinado a disciplinas de gerenciamento ativo de filas (como FQ-CoDel ou PIE) nas classes elásticas.
+\end{itemize}
