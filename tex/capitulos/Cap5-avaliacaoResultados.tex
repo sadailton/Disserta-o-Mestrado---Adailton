@@ -1,0 +1,152 @@
+\chapter{AVALIAÇÃO E RESULTADOS}
+\label{chap:avaliacao}
+
+
+\section{Tecnologias utilizadas}
+
+
+\section{Projeto de experimentos}
+
+\subsection{Protótipo 1 -- PolKA original: fatiamento com seleção de caminhos}
+\label{subsec:prototipo1}
+
+O primeiro protótipo foi implementado em hardware programável Intel Tofino sob o \textit{framework} \texttt{freeRtr}\footnote{\url{http://www.freertr.org/}}, com o objetivo de validar a capacidade do protocolo PolKA original em prover garantias de Qualidade de Serviço (QoS) exclusivamente por meio da seleção de caminhos fim a fim no plano de transporte.
+
+A topologia experimental, implantada no \textit{testbed} nacional PORVIR~\cite{nogueira2025porvir}, é composta por quatro nós implementados em comutadores programáveis Tofino (Figura~\ref{fig:porvir_topologia}). Para avaliar individualmente o desempenho das rotas disponíveis, foram configurados três túneis PolKA distintos: \texttt{VIX--RJ--SP}, \texttt{VIX--MG--SP} e \texttt{VIX--RJ--MG--SP}. 
+
+Inicialmente, caracterizou-se o desempenho de cada caminho em termos de latência média, vazão média e número de retransmissões, conforme sintetizado na Tabela~\ref{tab:metricas_porvir}. As medições de tráfego TCP foram conduzidas por meio da ferramenta \texttt{iperf3} durante 60 minutos para cada rota, com amostragens coletadas a cada 30 segundos. Complementarmente, o tempo de ida e volta médio (RTT) foi aferido via sondas ICMP (\texttt{ping}), com intervalos de 1 segundo, ao longo do mesmo período de 60 minutos. Os resultados evidenciam que o caminho \texttt{VIX--RJ--SP} apresenta desempenho significativamente superior aos demais, registrando vazão média 46 vezes maior (38,610~Gbit/s), menor latência (13~ms) e volume substancialmente reduzido de retransmissões (998 pacotes).
+
+\begin{table}[htbp]
+\centering
+\caption{Métricas de desempenho por caminho no \textit{testbed} PORVIR (Protótipo 1).}
+\label{tab:metricas_porvir}
+\begin{tabularx}{\textwidth}{Xccc}
+\toprule
+\textbf{Caminho} & \textbf{Latência média} & \textbf{Vazão média} & \textbf{Retransmissões (pacotes)} \\
+\midrule
+\texttt{VIX--RJ--SP}     & 13~ms & 38,610~Gbit/s & 998 \\
+\texttt{VIX--MG--SP}     & 17~ms & 0,829~Gbit/s  & 186.327 \\
+\texttt{VIX--RJ--MG--SP} & 26~ms & 0,787~Gbit/s  & 244.680 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% [Inserir Figura da Topologia PORVIR e Gráfico de Mudança de Caminho aqui: \label{fig:porvir_topologia} e \label{fig:porvir_vazao}]
+
+Após a etapa de caracterização, executou-se um experimento com três fluxos TCP concorrentes (gerados via \texttt{iperf3}) no enlace de alta capacidade (\texttt{VIX--RJ--SP}), simulando a coexistência entre uma fatia de rede de maior prioridade e duas fatias de menor prioridade. Nesse cenário, cada fluxo atua como uma fatia independente, recebendo recursos isolados e sendo reconfigurado dinamicamente conforme seus requisitos específicos de QoS. 
+
+A evolução temporal da vazão coletada ao longo dos eventos, espaçados em intervalos de 60 segundos, divide-se em duas fases principais (Figura~\ref{fig:porvir_vazao}):
+\begin{itemize}
+    \item \textbf{Fase de competição (0--180~s):} a fatia correspondente ao Fluxo~1 inicia operando isoladamente no caminho principal (\texttt{VIX--RJ--SP}). Nos instantes $t = 60\text{~s}$ e $t = 120\text{~s}$, as fatias dos Fluxos~2 e~3 são ativadas sobre a mesma rota, passando a disputar a largura de banda do enlace e degradando a taxa efetiva do fluxo prioritário.
+    \item \textbf{Fase de migração (180--300~s):} demonstrando o isolamento lógico e a adaptação dinâmica proporcionados pelo roteamento na origem, as fatias concorrentes são realocadas para rotas alternativas de menor capacidade sem necessidade de reconfiguração dos nós intermediários. O Fluxo~2 é migrado para o caminho \texttt{VIX--MG--SP} em $t = 180\text{~s}$, enquanto o Fluxo~3 é redirecionado para \texttt{VIX--RJ--MG--SP} em $t = 240\text{~s}$. Como resultado, a fatia do Fluxo~1 restabelece integralmente o uso da capacidade do enlace principal.
+\end{itemize}
+
+
+\subsection{Protótipo 2 -- SPolKA: fatiamento com seleção de caminhos e políticas de filas}
+\label{subsec:prototipo2}
+
+O segundo protótipo concentra-se na validação da arquitetura SPolKA, elevando a granularidade do fatiamento ao codificar simultaneamente a rota e a política de escalonamento de filas em um único rótulo (\texttt{routeID}) na borda da rede. Como o \textit{framework} \texttt{freeRtr} utilizado no ambiente físico ainda não suportava as extensões de cabeçalho do SPolKA à época dos ensaios, esta etapa foi desenvolvida no comutador de \textit{software} BMv2 emulado via Mininet. Para superar a limitação nativa de prioridade estrita do BMv2 — sujeita à inanição (\textit{starvation}) de fluxos de menor prioridade —, integrou-se um \textit{Traffic Manager} (TM) customizado em C++ via \textit{externs} P4~\cite{elbediwy2025enabling}, implementando o algoritmo \textit{Weighted Deficit Round Robin} (WDRR) ao final do \textit{pipeline} de ingresso.
+
+A avaliação do Protótipo~2 foi conduzida em uma topologia composta por seis nós de borda ($E_1$ a $E_6$) e seis nós de núcleo ($C_1$ a $C_6$), interconectados por enlaces com capacidade nominal de 10~Mbit/s (Figura~\ref{fig:prototipo2_topologia}). Cada interface de saída dos roteadores foi configurada com duas filas de serviço escalonadas via WDRR: a \textbf{Fila~1} (prioritária), com reserva de 70\% da largura de banda, e a \textbf{Fila~2}, com os 30\% remanescentes. Os fluxos de dados entre clientes ($H_i$) e servidores ($S_i$) foram gerados via \texttt{iperf3} utilizando o protocolo TCP. O protótipo foi avaliado em dois cenários complementares:
+
+% [Inserir Figura do Protótipo 2 (topologia e gráficos dos cenários 1 e 2) aqui]
+
+\subsubsection{Cenário 1 -- Reconfiguração dinâmica de políticas de filas}
+\label{subsubsec:prot2_cenario1}
+
+No primeiro cenário, investigou-se exclusivamente o impacto da alteração dinâmica de filas sobre um mesmo caminho físico (\texttt{\{C1, C3, C5, C6\}}). Foram instanciadas três fatias de rede: uma fatia de alta prioridade, representada pelo fluxo $H_3 \rightarrow S_3$, e duas fatias de menor prioridade, representadas pelos fluxos $H_4 \rightarrow S_4$ e $H_5 \rightarrow S_5$, visando validar o isolamento de recursos em condições de saturação do enlace:
+
+\begin{itemize}
+    \item \textbf{Compartilhamento inicial ($0 \le t < 270\text{~s}$):} em $t = 0\text{~s}$, o fluxo $H_3 \rightarrow S_3$ foi alocado na Fila~2 em todos os saltos. Pela propriedade de conservação de trabalho do algoritmo WDRR, na ausência de tráfego na Fila~1, a largura de banda total do enlace permanece disponível para a Fila~2. Nos instantes $t = 90\text{~s}$ e $t = 180\text{~s}$, os fluxos concorrentes $H_4 \rightarrow S_4$ e $H_5 \rightarrow S_5$ foram inseridos na mesma fila, resultando na divisão equitativa da capacidade do enlace entre as três fatias.
+    \item \textbf{Promoção para fila prioritária ($t \ge 270\text{~s}$):} em $t = 270\text{~s}$, o nó de borda reconfigurou o rótulo do fluxo $H_3 \rightarrow S_3$ para mapeá-lo à Fila~1 (detentora de 70\% de reserva). Essa alteração assegurou imediatamente o isolamento de desempenho para a fatia prioritária, enquanto os fluxos remanescentes na Fila~2 ($H_4$ e $H_5$) passaram a competir estritamente pelos 30\% residuais da banda, comprovando a eficácia do SPolKA em mitigar interferências entre classes de serviço sem intervenções no núcleo da rede.
+\end{itemize}
+
+\subsubsection{Cenário 2 -- Migração concomitante de rotas e filas}
+\label{subsubsec:prot2_cenario2}
+
+O segundo cenário avaliou a capacidade do SPolKA de realizar reconfigurações simultâneas de caminho e classe de serviço diante de congestionamentos localizados:
+
+\begin{itemize}
+    \item \textbf{Estado inicial e inserção de carga ($0 \le t < 180\text{~s}$):} em $t = 0\text{~s}$, instanciou-se a fatia $H_2 \rightarrow S_2$ pela rota superior \texttt{\{C1, C2, C4, C6\}} na Fila~2 (ocupando 100\% da banda por ausência de concorrência) e três fatias pela rota inferior \texttt{\{C1, C3, C5, C6\}}: $H_3 \rightarrow S_3$ na Fila~1 e os fluxos $H_4 \rightarrow S_4$ e $H_5 \rightarrow S_5$ na Fila~2. Em $t = 60\text{~s}$, introduziu-se o fluxo $H_1 \rightarrow S_1$ na rota inferior dentro da Fila~2, passando a dividir a cota de 30\% com $H_4$ e $H_5$.
+    \item \textbf{Elevação de prioridade na mesma rota ($180 \le t < 300\text{~s}$):} em $t = 180\text{~s}$, o fluxo $H_1 \rightarrow S_1$ foi promovido à Fila~1 mantendo o mesmo trajeto, passando a compartilhar a reserva de 70\% da banda com o fluxo prioritário $H_3 \rightarrow S_3$.
+    \item \textbf{Migração de rota com manutenção de fila ($t \ge 300\text{~s}$):} por fim, em $t = 300\text{~s}$, o nó de ingresso alterou o \texttt{routeID} do fluxo $H_1 \rightarrow S_1$ para desviá-lo à rota superior \texttt{\{C1, C2, C4, C6\}}, mantendo sua atribuição à Fila~1. Essa migração eliminou a disputa por recursos críticos: na rota superior, a fatia prioritária $H_1 \rightarrow S_1$ passou a usufruir isoladamente dos 70\% de banda da Fila~1, enquanto a fatia $H_2 \rightarrow S_2$ acomodou-se na reserva de 30\% da Fila~2; simultaneamente, na rota inferior, o fluxo $H_3 \rightarrow S_3$ recuperou integralmente sua cota de 70\% na Fila~1.
+\end{itemize}
+
+\subsection{Prototipo 3}
+
+\subsubsection{Experimento 1 - Tráfego sem classificação de prioridade}
+
+Os fluxos de protocolo UDP (classes 0 e 1) preservaram integralmente as vazões injetadas, registrando 2,0 Mbit/s e 0,3 Mbit/s com perdas irrelevantes de 0,006\% e 0,002\%, respectivamente. Tal comportamento se deve à natureza dessas fontes em malha aberta — desprovidas de controle de congestionamento para desaceleração — e ao fato de sua carga combinada (2,3 Mbit/s) corresponder a somente 0,23\% do limite do enlace. No entanto, a manutenção da vazão não impediu o impacto no desempenho: o RTT dessas classes saltou do tempo de propagação base de 5 ms para uma média de 10,49 ms, atingindo picos de 27,9 ms devido ao atraso gerado pelo compartilhamento da fila com o tráfego TCP. Assim, no regime FIFO, a garantia da vazão da classe de baixa latência ocorre à custa de um aumento no atraso.
+
+Por outro lado, as três correntes TCP, reguladas pelo mecanismo de controle de congestionamento CUBIC, responderam às perdas de pacotes (que somaram 19.300 retransmissões) ajustando suas janelas e dividindo de forma equilibrada a capacidade excedente do enlace: 302,2 Mbit/s, 292,5 Mbit/s e 297,9 Mbit/s. Isso representa uma variação inferior a 3\% na média do teste, muito embora seus perfis de vazão instantânea tenham apresentado flutuações e alternâncias no decorrer dos 300 segundos de execução. Cabe destacar que, apesar de pertencerem a categorias nominalmente distintas (high\_throughput, long\_living e best\_effort) e associadas a filas separadas nas configurações, a falta de uma política de escalonamento por classe invalida esses mapeamentos, impondo um tratamento uniforme a todas elas.
+
+O painel (b) apresenta o jitter das duas classes UDP. A classe 0 registra 0,935 ms e a classe 1, 2,533 ms. A diferença não decorre de tratamento distinto no núcleo — sob FIFO ambas compartilham a mesma fila — mas do próprio método de medição. O jitter definido pela RFC 3550 é uma estatística diferencial sobre pacotes consecutivos do fluxo medido, de modo que sua magnitude depende do intervalo entre esses pacotes. A classe 0 emite 2.500 pacotes por segundo (espaçamento de 0,4 ms) e a classe 1, 150 (6,67 ms): pacotes muito próximos encontram a fila em estados correlacionados e produzem estimativas menores de jitter, ainda que o atraso sofrido seja o mesmo.
+
+As sondas ICMP, que amostram ambos os caminhos na mesma cadência, confirmam a equivalência: a variação média do RTT entre amostras consecutivas é de 2,445 ms para a classe 0 e 2,121 ms para a classe 1, com desvios-padrão de 2,97 e 2,76 ms. Medidos em igualdade de condições, os dois caminhos apresentam o mesmo comportamento de atraso. Conclui-se que, nesta rodada, os valores de jitter devem ser lidos como medida absoluta do custo do enfileiramento FIFO para cada fluxo, e não como base de comparação entre as classes.
+
+
+
+\subsection{Experimento 2 - Tráfego com filas de garantia de banda (WDRR) }
+
+Com o objetivo de priorizar o tráfego e assegurar a reserva de banda direcionada a cada classe de serviço, este ensaio implementa o algoritmo Weighted Deficit Round Robin (WDRR) em todos os nós de transporte da rede.
+
+Avaliação:
+
+A rodada repete o cenário anterior substituindo a fila única por um DRR ponderado, uma fila por classe, com reserva de banda de 60\%, 20\% e 2\% para as classes high\_throughput, long\_living e best\_effort respectivamente. Demais parâmetros idênticos aos do FIFO.
+
+A diferenciação aparece de imediato. As três classes elásticas, antes indistinguíveis (302,2, 292,5 e 297,9 Mbit/s), passam a 505,8, 284,1 e 85,6 Mbit/s, ordenadas conforme os quanta. As classes prioritárias ganham latência: o RTT médio cai de 10,486 para 7,497 ms (classe 0) e de 10,286 para 7,366 ms (classe 1), o que equivale a reduzir o atraso de enfileiramento de 5,49 para 2,50 ms — mais de 54\% —, com o jitter caindo de 0,935 para 0,785 ms e de 2,533 para 1,939 ms. O custo recai sobre best_effort, que perde 71\% da vazão e tem o RTT elevado de 11,913 para 15,462 ms.
+
+\begin{table}[htbp]
+\centering
+\begin{tabularx}{\textwidth}{Xccc}
+\toprule
+\textbf{Métrica / Classe} & \textbf{\shortstack{FIFO\\(exp1\_fifo\_cubic)}} & \textbf{\shortstack{WDRR\\(exp1\_wdrr\_cubic)}} & \textbf{Variação} \\
+\midrule
+classe 0 --- RTT médio & 10,486~ms  & 7,497~ms  & $-28\%$ \\
+classe 1 --- RTT médio & 10,286~ms  & 7,366~ms  & $-28\%$ \\
+classe 0 --- jitter    & 0,935~ms   & 0,785~ms  & $-16\%$ \\
+classe 1 --- jitter    & 2,533~ms   & 1,939~ms  & $-23\%$ \\
+classe 2 ($q=60\%$)    & 302,2~Mbit/s & 505,8~Mbit/s & $+67\%$ \\
+classe 3 ($q=20\%$)    & 292,5~Mbit/s & 284,1~Mbit/s & $-3\%$  \\
+classe 6 ($q=2\%$)     & 297,9~Mbit/s & 85,6~Mbit/s  & $-71\%$ \\
+retransmissões         & 19.300     & 21.969    & $+14\%$ \\
+\bottomrule
+\end{tabularx}
+\caption{Comparação de desempenho entre os escalonadores FIFO e WDRR com o algoritmo CUBIC.}
+\label{tab:comparacao_fifo_wdrr}
+\end{table}
+
+
+\subsection{Experimento 3 - Tráfego com filas de garantia de latência e banda (SP-WDRR) }
+
+Com o objetivo de atender classes de serviço sensíveis ao atraso, este ensaio investiga o impacto da implementação de duas filas sob prioridade estrita (SP). As demais filas de tráfego conservam as mesmas definições atribuídas no experimento 2.
+
+Avaliação:
+
+Esta rodada mantém o DRR ponderado das classes elásticas e promove as classes 0 e 1 a bandas de prioridade estrita, servidas antes de qualquer outra. Demais parâmetros inalterados.
+
+Os benefícios concentram-se integralmente nas classes prioritárias. O RTT médio decresce de 7,497 ms para 6,054 ms na classe 0 e de 7,366 ms para 5,925 ms na classe 1. Subtraindo-se o tempo de propagação de 5 ms, observa-se que o atraso de enfileiramento encolhe de 2,50 ms para 1,05 ms e de 2,37 ms para 0,93 ms, o que representa retrações expressivas de 81\% e 82\% em comparação ao FIFO. Contudo, o aspecto mais significativo reside no comportamento da cauda: sob o esquema WDRR, o RTT máximo da classe 0 havia sofrido degradação em relação ao FIFO (subindo de 27,9 ms para 31,9 ms); já com a adoção da prioridade estrita, esse indicador recua para 20,7 ms, enquanto o percentil 95 diminui de 14,0 ms para 9,4 ms. Dessa forma, a previsibilidade e a disciplina apontadas pela média passam a se confirmar também nos cenários de pior caso — fator determinante para aplicações de baixa latência.
+
+O impacto sobre as classes elásticas mostra-se irrelevante. Como as classes promovidas possuem banda estritamente limitada por contrato (2,0 e 0,3 Mbit/s, totalizando apenas 0,23\% da capacidade do enlace), seu atendimento prioritário consome uma parcela mínima dos recursos. Essa limitação assegura a aplicabilidade da prioridade estrita, eliminando os riscos tipicamente associados a fluxos privilegiados sem restrição de crescimento. Consequentemente, a classe high\_throughput preserva seus 505,8 Mbit/s, enquanto long\_living e best\_effort sofrem reduções marginais de 1,3\% e 6,5\%, respectivamente. No agregado, a vazão conjunta das três classes recua somente 1,0\%, passando de 875,5 para 866,4 Mbit/s.
+
+\subsection{Experimento 4 - Tráfego com filas de garantia de latência e banda com controle de congestionamento BBR (SP-WDRR) }
+
+Este experimento visa avaliar o desempenho do algoritmo de controle de congestionamento BBR em comparação ao CUBIC, replicando as condições do experimento 3.
+
+Visão Geral dos Algoritmos
+
+CUBIC (Baseado em Perda): Aumenta a janela de congestionamento por meio de uma função cúbica até identificar a perda de pacotes, instante em que aplica uma redução multiplicativa. Por depender do esgotamento do buffer para detectar o congestionamento, o CUBIC tende a saturar a fila antes de reduzir a taxa de transmissão, resultando em oscilações (padrão dente de serra) e acúmulo de atraso.
+
+BBR (Baseado em Modelo): O Bottleneck Bandwidth and Round-trip propagation time estima continuamente a capacidade máxima do gargalo (BtlBw) e o menor RTT de propagação (RTprop). Em vez de reagir a perdas, ajusta o ritmo de envio para manter o volume de dados em trânsito próximo ao produto banda-atraso (BDP). O algoritmo realiza sondagens periódicas de largura de banda (ciclo de ganho) e reduz temporariamente o tráfego para recalibrar o RTT mínimo (ProbeRTT).
+
+Impacto Prático: Enquanto o CUBIC utiliza o buffer da rede como mecanismo de detecção, o BBR busca operar no ponto ideal de operação da curva de vazão e atraso, minimizando o enfileiramento. A versão utilizada (BBRv1 no kernel Linux 6.8) apresenta maior tolerância a perdas de pacotes, influenciando os resultados observados a seguir.
+
+Avaliação:
+
+Substituindo o CUBIC pelo BBR nos três fluxos TCP nesta rodada, a assinatura característica do algoritmo manifesta-se prontamente no painel (a): ao invés de oscilarem e alternarem posições — comportamento típico do CUBIC —, as vazões estabilizam-se em torno de patamares bem definidos. Essa estabilidade resulta da estratégia do BBR de cadenciar a transmissão com base em uma taxa estimada, evitando a dinâmica de crescer continuamente até a perda de pacotes para só então recuar.
+
+Com essa mudança, a vazão agregada atingiu 890,6 Mbit/s, ante os 866,4 Mbit/s anteriores (+2,8\%). Paralelamente, registrou-se redução do RTT em todos os fluxos TCP: a classe high\_throughput caiu de 11,20 para 10,32 ms; a long\_living, de 12,12 para 10,88 ms; e a best\_effort, de 14,21 para 13,62 ms. Esse avanço focou-se na classe com maior quantum, cuja taxa subiu de 505,8 para 564,6 Mbit/s, ao passo que as duas outras classes tiveram reduções de aproximadamente 9\% cada.
+
+Em contrapartida, houve um expressivo acréscimo de 159\% nas retransmissões, subindo de 24.482 para 63.403, com a classe high\_throughput respondendo por 49.350 do total (0,34\% dos segmentos transmitidos). Esse fenômeno é condizente com as premissas do BBRv1, que não toma descartes como indicativo direto de congestionamento, preservando a vazão estimada. Por fim, enquanto as classes prioritárias sustentaram o patamar mínimo de latência da rota — com RTT de 5,96 ms em ambas e jitter menor do que na avaliação com CUBIC (0,789 e 1,439 ms) —, a taxa de perda na classe 0 elevou-se de 0,011\% para 0,100\%.
+
+Nota: Embora o algoritmo BBR já esteja em sua versão 3 (disponível como rascunho de RFC em \href{https://datatracker.ietf.org/doc/draft-ietf-ccwg-bbr/}{https://datatracker.ietf.org/doc/draft-ietf-ccwg-bbr/)}, a análise realizada emprega a versão 1, por se tratar da única alternativa nativamente presente em todas as compilações do kernel Linux a partir da versão 4.9.

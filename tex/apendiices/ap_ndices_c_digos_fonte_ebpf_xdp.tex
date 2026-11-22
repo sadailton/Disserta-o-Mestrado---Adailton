@@ -1,0 +1,332 @@
+% ==============================================================================
+% APÊNDICES - CÓDIGOS-FONTE DO PLANO DE DADOS SPOLKA EM eBPF/XDP
+% ==============================================================================
+% Arquivo formatado para ser incluído diretamente no main.tex da classe ifes8:
+%   \printbibliography
+%   \include{tex/apendices/apendices_ebpf}
+
+\begin{apendicesenv}
+
+\chapter{CÓDIGO-FONTE DO ENCAPSULAMENTO NA BORDA (\texttt{spolka\_edge\_encap.c})}
+\label{apendice:encap}
+
+Este apêndice apresenta o programa eBPF anexado ao gancho \texttt{TC egress} da interface \texttt{eth1} dos nós de borda ($H_1$--$H_3$ e $S_1$--$S_3$). O código realiza a classificação dos pacotes IPv4 mediante consulta de prefixo mais longo (\texttt{BPF\_MAP\_TYPE\_LPM\_TRIE}) sobre a chave composta pelo endereço IPv4 de destino e pelo campo DSCP, inserindo os 8~bytes do identificador \routeID\ no cabeçalho do quadro por meio da função auxiliar \texttt{bpf\_skb\_change\_head()}.
+
+\begin{lstlisting}[language=C, caption={Programa eBPF de classificação e encapsulamento na borda (\texttt{spolka\_edge\_encap.c}).}, label={lst:spolka_edge_encap}]
+#include <linux/bpf.h>
+
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+#include <linux/tcp.h>
+#include <linux/pkt_cls.h>
+
+#ifndef IPPROTO_TCP
+#define IPPROTO_TCP 6
+#endif
+
+#define TYPE_SRCROUTING 0x1234
+#define ROUTE_ID_SIZE 8
+
+// Chave da tabela_encap: (IP de destino, DSCP). O IP vem ANTES do TOS de
+// proposito. O LPM trie casa um prefixo contiguo a partir do bit 0, entao:
+//
+//   prefixlen 40 -> IP + classe   (routeID especifico daquela classe)
+//   prefixlen 32 -> IP            (default: vale para qualquer classe)
+//
+// Como o casamento mais longo vence, uma unica busca resolve os dois casos:
+// a classe com routeID proprio pega a entrada de 40 bits, e qualquer outra
+// cai no default de 32 bits. E o que permite o slicing por classe do SPolKA
+// sem precisar instalar as 7 classes em todo destino.
+//
+// Os 3 bytes de padding no fim da struct ficam fora do prefixo (bits 40..63)
+// e portanto nao participam do casamento.
+struct polka_lpm_key {
+  __u32 prefixlen;
+  __u32 ipv4_addr;
+  __u8 tos;
+};
+
+#define PREFIX_IP_BITS 32
+#define PREFIX_IP_TOS_BITS 40
+
+// Mascara os 2 bits de ECN: o TCP os altera em voo, e so o DSCP identifica a
+// classe de servico.
+#define DSCP_MASK 0xFC
+
+struct {
+  __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+  __uint(max_entries, 1024);
+  __type(key, struct polka_lpm_key);
+  __type(value, __u64);
+  __uint(map_flags, BPF_F_NO_PREALLOC);
+} tabela_encap SEC(".maps");
+
+SEC("classifier")
+int polka_edge_encap(struct __sk_buff *skb) {
+  void *data_end = (void *)(long)skb->data_end;
+  void *data = (void *)(long)skb->data;
+
+  struct ethhdr *eth = data;
+  if ((void *)(eth + 1) > data_end)
+    return TC_ACT_OK;
+
+  if (eth->h_proto != bpf_htons(ETH_P_IP)) {
+    return TC_ACT_OK;
+  }
+
+  struct iphdr *iph = (void *)(eth + 1);
+  if ((void *)(iph + 1) > data_end)
+    return TC_ACT_OK;
+
+  struct polka_lpm_key key = {
+      .prefixlen = PREFIX_IP_TOS_BITS,
+      .ipv4_addr = iph->daddr,
+      .tos = iph->tos & DSCP_MASK,
+  };
+
+  __u8 *route_id_encontrado = bpf_map_lookup_elem(&tabela_encap, &key);
+  if (!route_id_encontrado) {
+    bpf_printk("encap: no route ID found for dest %pI4 tos 0x%x\n", &iph->daddr,
+               key.tos);
+    return TC_ACT_OK;
+  }
+
+  // --- EXECUCAO DO PUSH DO CABECALHO POLKA ---
+
+  // 1. Salva o cabecalho Ethernet original na pilha
+  struct ethhdr eth_backup;
+  __builtin_memcpy(&eth_backup, eth, sizeof(struct ethhdr));
+  eth_backup.h_proto = bpf_htons(TYPE_SRCROUTING);
+
+  __u8 route_id_backup[ROUTE_ID_SIZE];
+  __builtin_memcpy(route_id_backup, route_id_encontrado, ROUTE_ID_SIZE);
+
+  // 2. Prepend de 8 bytes na cabeca do pacote. bpf_skb_change_head so desloca
+  // o ponteiro de dados, sem tocar em metadados de L3/L4 (checksum, GSO) --
+  // diferente de bpf_skb_adjust_room, que corrompe esses metadados e quebra
+  // TCP (segmentos presos, sem avanco de cwnd).
+  if (bpf_skb_change_head(skb, ROUTE_ID_SIZE, 0)) {
+    bpf_printk("encap: bpf_skb_change_head failed\n");
+    return TC_ACT_OK;
+  }
+
+  data = (void *)(long)skb->data;
+  data_end = (void *)(long)skb->data_end;
+
+  struct ethhdr *new_eth = data;
+  if ((void *)(new_eth + 1) > data_end) {
+    bpf_printk("encap: new_eth out of bounds\n");
+    return TC_ACT_SHOT;
+  }
+
+  // 3. Escreve o novo Ethernet header (offset 0)
+  __builtin_memcpy(new_eth, &eth_backup, sizeof(struct ethhdr));
+
+  // 4. Escreve o RouteID logo apos o novo MAC (offset 14)
+  __u8 *polka_route_field = (__u8 *)(new_eth + 1);
+  if ((void *)(polka_route_field + ROUTE_ID_SIZE) > data_end) {
+    bpf_printk("encap: polka_route_field out of bounds\n");
+    return TC_ACT_SHOT;
+  }
+
+  __builtin_memcpy(polka_route_field, route_id_backup, ROUTE_ID_SIZE);
+
+  return TC_ACT_OK;
+}
+
+char _license[] SEC("license") = "GPL";
+\end{lstlisting}
+\fonte{Elaborado pelo autor (2026).}
+
+% ==============================================================================
+\chapter{CÓDIGO-FONTE DO ENCAMINHAMENTO NO NÚCLEO (\texttt{spolka\_core.c})}
+\label{apendice:core}
+
+Este apêndice apresenta o programa eBPF anexado ao gancho \texttt{TC ingress} (\texttt{clsact}) das interfaces de dados dos roteadores de núcleo ($C_1$ a $C_8$). O programa executa a divisão polinomial em $GF(2)$ (\texttt{poly\_mod}) sobre o \routeID\ utilizando o polinômio irredutível local armazenado em \texttt{mapa\_polinomio}, extrai simultaneamente a porta lógica de saída e o identificador da fila (\texttt{queue\_id}), registra a fila em \texttt{skb->priority} e redireciona o pacote via \texttt{bpf\_redirect()}.
+
+\begin{lstlisting}[language=C, caption={Programa eBPF de decodificação em $GF(2)$ e encaminhamento sem estado no núcleo (\texttt{spolka\_core.c}).}, label={lst:spolka_core}]
+#include <linux/bpf.h>
+
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+
+#include <linux/if_ether.h>
+#include <linux/pkt_cls.h>
+
+#define TYPE_SRCROUTING 0x1234
+
+// Estrutura PolKA compacta
+struct polka_t_top {
+  unsigned char h_dest[ETH_ALEN];
+  unsigned char h_source[ETH_ALEN];
+  __be16 etherType;
+  __u8 routeId[8];
+} __attribute__((packed));
+
+struct {
+  __uint(type, BPF_MAP_TYPE_ARRAY);
+  __uint(max_entries, 1);
+  __uint(key_size, sizeof(__u32));
+  __uint(value_size, sizeof(__u16));
+} mapa_polinomio SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_ARRAY);
+  __uint(max_entries, 16);
+  __uint(key_size, sizeof(__u32));
+  __uint(value_size, sizeof(__u32));
+} mapa_portas SEC(".maps");
+
+/*
+ * GF(2) Polynomial Modulo
+ * Calcula: div % mod
+ * Implementa divisao polinomial binaria (CRC-like) inteiramente sobre
+ * registradores de 32 bits, sem acesso a memoria.
+ */
+static __always_inline __u32 poly_mod(__u32 div, __u32 mod) {
+  if (mod == 0) return 0;
+
+  // Encontra o bit mais significativo (MSB) do modulo
+  int mod_msb = 0;
+#pragma unroll
+  for (int i = 0; i < 32; i++) {
+    if ((mod >> i) & 1) {
+      mod_msb = i;
+    }
+  }
+
+  // Processa bits do MSB para baixo
+#pragma unroll
+  for (int i = 31; i >= 0; i--) {
+    if (i >= mod_msb) {
+      if ((div >> i) & 1) {
+        __u32 shift = i - mod_msb;
+        __u32 shifted_mod = mod << shift;
+        div ^= shifted_mod;
+      }
+    }
+  }
+  return div;
+}
+
+SEC("classifier")
+int polka_core_router(struct __sk_buff *skb) {
+  void *data_end = (void *)(long)skb->data_end;
+  void *data = (void *)(long)skb->data;
+
+  struct polka_t_top *polka = data;
+  if ((void *)(polka + 1) > data_end)
+    return TC_ACT_OK;
+  if (polka->etherType != bpf_htons(TYPE_SRCROUTING))
+    return TC_ACT_OK;
+
+  // RouteID de 64 bits: bytes superiores carregam o dividendo e os 2 bytes
+  // inferiores carregam o termo independente (dif)
+  __u16 dif = (__u16)((polka->routeId[6] << 8) | polka->routeId[7]);
+
+  __u32 route_val = ((__u32)polka->routeId[0] << 24) |
+                    ((__u32)polka->routeId[1] << 16) |
+                    ((__u32)polka->routeId[2] << 8)  |
+                    ((__u32)polka->routeId[3]);
+
+  __u32 key = 0;
+  __u16 *polinomio_no = bpf_map_lookup_elem(&mapa_polinomio, &key);
+  __u32 poly = polinomio_no ? (__u32)*polinomio_no : 0xA001;
+
+  __u32 nresult = poly_mod(route_val, poly);
+  __u16 nport_raw = (__u16)nresult ^ dif;
+
+  // --- EXTRACAO SIMULTANEA DE PORTA E FILA (BIT-SLICING) ---
+  __u16 queue_id = nport_raw & 0x0007; // Extrai os 3 bits de Fila
+  __u16 logical_port = nport_raw >> 3; // Extrai a Porta Logica
+
+  __u32 key_port = logical_port;
+  __u32 *ifindex_ptr = bpf_map_lookup_elem(&mapa_portas, &key_port);
+  __u32 ifindex_out = ifindex_ptr ? *ifindex_ptr : 0;
+
+  if (ifindex_out == 0)
+    return TC_ACT_SHOT;
+
+  // Informa a disciplina de fila (qdisc) a qual fatia este pacote pertence
+  if (queue_id == 0) {
+      queue_id = 1;
+  }
+  skb->priority = 0x00010000 | queue_id;
+
+  // Redireciona diretamente para o Egress da interface de saida
+  return bpf_redirect(ifindex_out, 0);
+}
+
+char _license[] SEC("license") = "GPL";
+\end{lstlisting}
+\fonte{Elaborado pelo autor (2026).}
+
+% ==============================================================================
+\chapter{CÓDIGO-FONTE DO DESENCAPSULAMENTO NA BORDA (\texttt{spolka\_edge\_decap.c})}
+\label{apendice:decap}
+
+Este apêndice apresenta o programa XDP nativo anexado à interface \texttt{eth1} dos nós de borda de egresso ($H_1$--$H_3$ e $S_1$--$S_3$). Ao interceptar quadros com \textit{EtherType} \texttt{0x1234}, o programa aciona a primitiva \texttt{bpf\_xdp\_adjust\_head()} para remover os 8~bytes do cabeçalho \nome, restaura o \textit{EtherType} para IPv4 (\texttt{0x0800}) e entrega o pacote original à pilha de rede do sistema operacional (\texttt{XDP\_PASS}).
+
+\begin{lstlisting}[language=C, caption={Programa XDP nativo de remoção do rótulo na borda (\texttt{spolka\_edge\_decap.c}).}, label={lst:spolka_edge_decap}]
+#include <linux/bpf.h>
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+
+#define TYPE_SRCROUTING 0x1234
+#define ROUTE_ID_SIZE 8
+
+SEC("xdp")
+int polka_edge_decap(struct xdp_md *ctx) {
+  void *data_end = (void *)(long)ctx->data_end;
+  void *data = (void *)(long)ctx->data;
+
+  struct ethhdr *eth = data;
+  if ((void *)(eth + 1) > data_end)
+    return XDP_PASS;
+
+  if (eth->h_proto != bpf_htons(TYPE_SRCROUTING)) {
+    return XDP_PASS;
+  }
+
+  // --- EXECUCAO DO POP (REMOCAO DO CABECALHO) ---
+
+  // 1. Guarda o cabecalho Ethernet original na memoria
+  struct ethhdr eth_backup;
+  __builtin_memcpy(&eth_backup, eth, sizeof(struct ethhdr));
+
+  // 2. Encolhe o pacote em 8 bytes na cabeca (bpf_xdp_adjust_head)
+  int err = bpf_xdp_adjust_head(ctx, ROUTE_ID_SIZE);
+  if (err) {
+    bpf_printk("decap: bpf_xdp_adjust_head failed: %d\n", err);
+    return XDP_DROP;
+  }
+
+  // 3. Recalcula ponteiros (obrigatorio para o Verificador eBPF)
+  data = (void *)(long)ctx->data;
+  data_end = (void *)(long)ctx->data_end;
+
+  struct ethhdr *new_eth = data;
+  if ((void *)(new_eth + 1) > data_end) {
+    return XDP_DROP;
+  }
+
+  // 4. Altera a copia guardada para o EtherType IPv4
+  eth_backup.h_proto = bpf_htons(ETH_P_IP);
+
+  // 5. Cola o cabecalho Ethernet guardado na nova posicao
+  __builtin_memcpy(new_eth, &eth_backup, sizeof(struct ethhdr));
+
+  return XDP_PASS;
+}
+
+char _license[] SEC("license") = "GPL";
+\end{lstlisting}
+\fonte{Elaborado pelo autor (2026).}
+
+\end{apendicesenv}
+

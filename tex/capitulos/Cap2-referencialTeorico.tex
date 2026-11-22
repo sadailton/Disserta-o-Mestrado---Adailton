@@ -1,0 +1,126 @@
+\chapter{REFERENCIAL TEÓRICO}
+\label{chap:referencialTeorico}
+Este capítulo faz uma revisão bibliográfica sobre os principais conceitos relacionados ao problema de pesquisa.
+
+% TODO: Colocar o diagrama do cabeçlho polka e do spolka;
+% 
+
+\section{REDES DEFINIDAS POR SOFTWARE}
+
+\subsection{Conteitos Gerais}
+No âmbito das redes de computadores, a Engenharia de Tráfego (\textit{Traffic Engineering} — TE) compreende o conjunto de técnicas voltadas à medição, modelagem e controle dos fluxos de dados, visando assegurar a eficiência operacional da infraestrutura de comunicação. Seu objetivo primordial consiste em maximizar o aproveitamento da largura de banda e prevenir cenários de congestionamento, viabilizando o cumprimento de parâmetros estritos de Qualidade de Serviço (\textit{Quality of Service} — QoS) por meio do tratamento prioritário de aplicações sensíveis ou de missão crítica.
+
+Para que a TE atue de forma preditiva e adaptativa — identificando padrões de tráfego, sazonalidades ou anomalias —, as redes demandam flexibilidade e mecanismos dinâmicos de reconfiguração em tempo real. Nesse cenário, as arquiteturas convencionais enfrentam entraves devido ao acoplamento entre a tomada de decisão e o encaminhamento físico. Essa limitação impulsionou o surgimento das Redes Definidas por Software (\textit{Software-Defined Networking} — SDN), paradigma que introduz a separação explícita entre o plano de controle (responsável pela inteligência e pelas decisões de roteamento) e o plano de dados (encarregado unicamente do trânsito e comutação dos pacotes). Essa separação é ilustrado pela Figura \ref{fig:arquitetura_sdn}.
+
+\begin{figure}[H]
+    \caption{Arquitetura SDN.}
+    \label{fig:arquitetura_sdn}
+    \centering
+    \includegraphics[width=0.6\textwidth]{figuras/arquitetura_sdn.pdf}
+    \captionsetup{justification=centering}
+    
+    \fonte{Adaptado de \textcite{katukam2013sdn}}
+\end{figure}
+
+Ao centralizar logicamente o plano de controle em uma entidade denominada controlador SDN, a rede ganha visibilidade global e capacidade de abstração do hardware subjacente. Em contraposição aos modelos tradicionais, nos quais os dispositivos operam com inteligência distribuída e tabelas configuradas individualmente de forma autônoma ou estática, a abordagem SDN permite gerenciar políticas de segurança, balanceamento e alocação de largura de banda de maneira coordenada e automatizada a partir de um único núcleo de controle.
+
+\subsection{Linguagem P4}
+
+Os dispositivos de rede apresentam diferentes níveis de programabilidade consoante a sua arquitetura de conceção. Tradicionalmente, grande parte dos equipamentos em operação possui um plano de dados estático e fechado, o que restringe severamente a incorporação de novos protocolos e dificulta a avaliação empírica de propostas de encaminhamento não padronizadas pelos fabricantes.
+
+A linguagem P4 (\textit{Programming Protocol-independent Packet Processors}) surge como uma linguagem de domínio específico concebida precisamente para especificar e programar a lógica de funcionamento do plano de dados em elementos de encaminhamento, como switches e roteadores. Distinguindo-se da abordagem introduzida pelo OpenFlow — que se apoiava em tabelas de fluxo com cabeçalhos e correspondências pré-definidas —, o P4 outorga ao desenvolvedor a capacidade de determinar como os pacotes de rede devem ser descompactados (\textit{parsing}), analisados, modificados e reencaminhados de maneira totalmente independente de protocolos pré-estabelecidos. Torna-se, assim, viável a criação ou adaptação de formatos de cabeçalhos, a customização de primitivas de processamento e a especificação detalhada de cada etapa do pipeline de comutação \cite{KAUR2021109}.
+
+\begin{figure}[!htbp]
+    \centering
+    \caption{Fluxo de trabalho de um programa P4.}
+    \includegraphics[width=0.85\textwidth]{figuras/fluxo_p4.pdf}
+    \fonte{Adaptado de \textcite{p4org2025workflow}.}
+    \label{fig:fluxo-p4}
+\end{figure}
+
+A Figura \ref{fig:fluxo-p4} ilustra o fluxo de trabalho típico da programação de um dispositivo P4. Para cada alvo, o fabricante fornece um modelo de arquitetura, que define os blocos programáveis e as interfaces disponíveis, e um compilador P4 específico. O compilador mapeia o programa P4 para os recursos desse alvo e gera dois artefatos. O primeiro é a configuração do plano de dados (target\_prog.bin), que implementa a lógica de processamento de pacotes descrita no programa. O segundo é o arquivo P4Info (prog.p4info), que funciona como um contrato entre os planos de controle e de dados. Ele descreve as tabelas, ações e demais objetos do programa e permite que o controlador gerencie o estado desses objetos em tempo de execução por meio da API P4Runtime.
+
+Esta capacidade de parametrizar o processamento dos fluxos diretamente no silício e no circuito de encaminhamento constitui um marco crucial na evolução das Redes Definidas por Software. Por intermédio do P4, projetistas e investigadores adquirem autonomia para conceber, homologar e implementar arquiteturas de encaminhamento e mecanismos de otimização de tráfego de ponta, prescindindo da espera pelos longos ciclos de atualização de \textit{firmware} fechados ou da substituição de plataformas de hardware proprietárias. Com isso, os dispositivos deixam a condição de "caixas-pretas" imutáveis e assumem o papel de sistemas flexíveis e plenamente configuráveis.
+
+\subsection{Tecnologia eBPF}
+
+O \textit{Extended Berkeley Packet Filter} (eBPF) consiste em uma tecnologia de infraestrutura que atua como uma máquina virtual leve de 64 bits integrada ao núcleo (kernel) do Linux, projetada para executar código customizado, seguro e de alto desempenho em tempo de execução sem requerer modificações no código-fonte nem a inclusão de módulos proprietários no sistema operacional \cite{sharaf2022extended}. Trata-se de uma evolução substancial da arquitetura clássica Berkeley Packet Filter (cBPF) — originalmente voltada apenas para a captura estática de pacotes e filtragem de chamadas de sistema —, ampliando o seu alcance para uma plataforma programável genérica e orientada a eventos, cujas instruções são compiladas dinamicamente em código de máquina nativo via JIT (\textit{Just-In-Time}) e submetidas a um rigoroso verificador estático in-kernel que assegura o término do programa e a segurança dos acessos à memória \cite{di2019berkeley}.
+
+No âmbito do processamento de tráfego de rede e da implementação de Funções de Rede Virtualizadas (\textit{Network Functions Virtualization} — NFV), o eBPF viabiliza a criação de planos de dados de alto rendimento ancorados diretamente aos pontos de acoplamento (\textit{hooks}) do subsistema de rede do Linux \cite{sharaf2022extended}. Sobressai nesse contexto o \textit{eXpress Data Path} (XDP), que intercepta os pacotes logo após a recepção pelos circuitos da placa de rede (NIC) e antes de qualquer alocação de estruturas de metadados de custo computacional elevado, tais como o \textit{sk\_buff}, permitindo ações imediatas de descarte, desvio ou reescrita de cabeçalhos, além de suportar chamadas em cauda (\textit{tail calls}) para encadear funções modulares em cadeias complexas de serviços \cite{miano2018creating}.
+
+Por fim, a retenção de estado e o compartilhamento bidirecional de dados entre as rotinas em execução no núcleo e os processos de gestão no espaço do usuário (\textit{user space}) estruturam-se sobre o conceito de eBPF Maps \cite{sharaf2022extended}. Estas estruturas flexíveis do tipo chave-valor — como arranjos, tabelas hash e filas gerenciadas nativamente pelo núcleo — operam com segurança concorrente entre múltiplos núcleos sem travas tradicionais, o que viabiliza tanto a sincronização dinâmica de políticas de encaminhamento quanto a extração não intrusiva de telemetria para subsidiar decisões adaptativas de engenharia de tráfego \cite{miano2018creating}.   
+
+%----------------------------------------------------------------------
+
+\section{PROTOCOLOS DE ROTEAMENTO NA ORIGEM}
+Os protocolos de Roteamento na Origem (\textit{Source Routing} — SR) constituem um paradigma no qual a determinação da trajetória percorrida pelos pacotes é transferida dos elementos intermediários da infraestrutura para o nó emissor. Sob este modelo, o nó de entrada define explicitamente a sequência de saltos necessária para alcançar o destino, encapsulando essas instruções diretamente num cabeçalho específico anexado ao pacote \cite{dominicini2020}.
+
+Esta abordagem concede à estação de origem um controle minucioso sobre o trajeto dos fluxos, sendo particularmente vantajosa para a imposição de políticas estritas de engenharia de tráfego, execução de testes de desempenho e monitorização de enlaces. Apesar de a necessidade de conhecimento prévio da topologia completa representar um desafio em arquiteturas dinâmicas convencionais, o \textit{Source Routing} integra-se de forma sinérgica com as Redes Definidas por Software (SDN). Em cenários SDN, a visibilidade global providenciada pelo controlador central, combinada com mecanismos de telemetria, permite calcular percursos ótimos e codificar as decisões de encaminhamento diretamente nos pacotes na borda da rede.
+
+No âmbito da sua operação, os protocolos de SR dividem-se em duas abordagens principais:   
+\begin{itemize}
+    \item Roteamento Estrito na Origem (\textit{Strict Source Routing}): o trajeto é determinado de forma exata e mandatória, sendo cada nó intermediário e interface de saída especificado no cabeçalho. O pacote é obrigado a transitar estritamente pela sequência delimitada, sem desvios operacionais.
+    \item Roteamento Livre na Origem (\textit{Loose Source Routing}): a origem define apenas pontos-chave ou nós de passagem obrigatórios ao longo do percurso, conferindo maior flexibilidade. Os segmentos entre os nós intermediários estipulados são resolvidos dinamicamente através de protocolos de roteamento convencionais baseados em tabelas de encaminhamento.
+\end{itemize}
+ 
+\subsection{O protocolo PolKA}
+
+Como uma alternativa inovadora aos modelos tradicionais de Roteamento Estrito na Origem (\textit{Strict Source Routing}), a arquitetura \polka (\textit{Polynomial Key-based Architecture}) fundamenta o seu mecanismo de encaminhamento no Sistema Numérico de Resíduos (\textit{Residue Number System} — RNS). A grande distinção do protocolo reside na capacidade de descrever trajetos arbitrários e múltiplos caminhos através de um modelo totalmente sem estado (\textit{stateless}) nos elementos comutadores, dispensando consultas a tabelas de fluxos nos nós internos ou a reescrita sistemática de cabeçalhos ao longo do trânsito dos pacotes. Tal proeza é viabilizada pelo emprego da aritmética polinomial binária definida sobre um Campo de Galois de ordem 2, denominado $\text{GF}(2)$, cujas propriedades algébricas garantem a invariância do identificador de rota (routeID) durante todo o ciclo de vida do pacote no núcleo da rede \cite{dominicini2020}.
+
+A mecânica de comutação do PolKA converte os roteadores de núcleo em elementos simplificados que executam exclusivamente operações de divisão polinomial em módulo. Em termos formais, considere um pacote destinado a percorrer um caminho predefinido constituído por uma sequência ordenada de $N$ nós de núcleo e as suas respetivas interfaces de saída. Cada nó participante $i$ (para $i = 1, 2, \dots, N$) possui um identificador unívoco denominado nodeID, modelado por um polinómio irredutível $s_i(t) \in \text{GF}(2)[t]$, sendo todos os elementos do conjunto $S = \{s_1(t), s_2(t), \dots, s_N(t)\}$ coprimos entre si e com grau que satisfaz a condição $\text{grau}(s_i(t)) \ge \lceil \log_2(\text{nports}) \rceil$, em que $\text{nports}$ representa o número de portas ativas do equipamento. Por sua vez, a interface de saída pretendida em cada salto é expressa por um polinómio de porta $o_i(t) \in \text{GF}(2)[t]$ com $\text{grau}(s_i(t)) > \text{grau}(o_i(t))$.
+
+Com base na topologia e na sequência estipulada de saltos, o plano de controlo calcula um único identificador de rota, o polinómio $R(t)$, por intermédio do Teorema Chinês dos Restos Polinomial (CRT), de modo a satisfazer simultaneamente o seguinte sistema de congruências:   $$R(t) \equiv o_i(t) \pmod{s_i(t)}, \quad \forall \, i \in \{1, 2, \dots, N\}$$   Esse valor $R(t)$ calculado é inserido no cabeçalho do pacote unicamente no nó de ingresso (borda da rede). Ao receber o quadro, cada comutador de núcleo obtém a sua interface local de encaminhamento de modo determinístico através da operação de resto euclidiano entre o rótulo $R(t)$ e o seu próprio identificador de nó, expressa por $o_i(t) = \langle R(t) \rangle_{s_i(t)}$. Por conseguinte, elimina-se o tempo de convergência e a sobrecarga de controlo habituais em redes comutadas tradicionais, visto que a criação, modificação ou migração de fluxos para novos túneis exige unicamente a reparametrização das políticas nos dispositivos de borda.
+
+\section{Slicing}
+
+O fatiamento de rede (network slicing) é um paradigma arquitetural que permite particionar uma infraestrutura física partilhada em múltiplas redes lógicas independentes, isoladas e personalizadas (slices). Cada fatia combina recursos computacionais, de armazenamento, de transporte e de acesso rádio com funções de rede específicas (físicas ou virtualizadas), configuradas de ponta a ponta para satisfazer requisitos distintos de qualidade de serviço (QoS) e acordos de nível de serviço (SLA), tais como casos de uso de banda larga móvel (eMBB), comunicações de baixa latência e ultraconfiabilidade (URLLC) ou Internet das Coisas massiva (Massive IoT / mMTC). Em vez de depender de redes tradicionais incapazes de responder a requisitos heterogéneos devido ao acoplamento rígido entre funções de rede e hardware específico, este modelo recorre a redes definidas por software (SDN), virtualização de funções de rede (NFV), computação na nuvem/nevoeiro (cloud/fog) e computação na periferia multiacesso (MEC) para proporcionar controlo programável e abstração de recursos \cite{BARAKABITZE2020106984} e \cite{wijethilaka2021survey}.
+
+Quanto ao surgimento do termo, a sua genealogia exige distinguir duas etapas complementares na literatura científica e técnica. O vocábulo "slice" (fatia) emergiu inicialmente no domínio académico das redes de computadores e plataformas de experimentação distribuída no início da década de 2000, com destaque para a arquitetura PlanetLab (2002–2003), que introduziu a partição de infraestruturas sobrepostas em fatias isoladas para investigação, consolidando-se posteriormente com camadas de virtualização SDN e arquiteturas como 4WARD (2009) e FlowVisor (2009–2010). Contudo, a expressão composta "Network Slicing" como paradigma arquitetural de serviços para telecomunicações móveis de quinta geração (5G) foi formalmente introduzida e popularizada pela NGMN Alliance (Next Generation Mobile Networks) em fevereiro de 2015, no seu 5G White Paper, e detalhada conceptualmente em janeiro de 2016.
+
+\begin{figure}[H]
+    \caption{Fatiamento em redes 5G.}
+    \label{fig:fatiamento_5g}
+    \centering
+    \includegraphics[width=0.6\textwidth]{figuras/fatiamento_5g.pdf}
+    \captionsetup{justification=centering}
+    \fonte{Adaptado de \textcite{inseego2026slicing}}
+\end{figure}
+
+Desde então, o conceito evoluiu desde mecanismos precursores rígidos de separação no núcleo 4G — nomeadamente Dedicated Core Networks (DECOR e eDECOR) nas Releases 13 e 14 do 3GPP 1  — até à especificação nativa no 5G (3GPP Release 15), focada inicialmente em domínios isolados, sobretudo o Core Network 2 . Entre 2018 e 2026, a evolução expandiu-se para a integração de verticais industriais e mecanismos de admissão e acesso rádio (Releases 16 e 17) 3 , para a padronização do transporte em tecnologias IETF (RFC 9543, março de 2024) e propostas para redes ópticas 4 , para o suporte nativo ao fatiamento na arquitetura O-RAN 5  e, mais recentemente, para a gestão autónoma em ciclo fechado (ETSI ZSM) e orientada por intenções (3GPP Release 18), avançando rumo a arquiteturas 6G AI-native de otimização conjunta ponta a ponta 6 . Para sustentar uma dissertação de mestrado com rigor bibliográfico, apresentam-se na última secção os artigos seminais, revisões de literatura (surveys) de referência e normas técnicas essenciais, acompanhados dos respetivos desafios científicos em aberto.
+
+\section{Redes Cientes de Caminho}
+\label{sec:path_aware}
+
+Na arquitetura tradicional da Internet, o encaminhamento de pacotes orienta-se pelo princípio fim a fim (\textit{end-to-end argument}), no qual a inteligência de controle de congestionamento e confiabilidade reside nos sistemas finais (\textit{endpoints}), enquanto os roteadores intermediários operam de maneira simplificada com base em tabelas locais e endereços de destino \cite{postel1981, borges2024pot}. Sob esse paradigma de melhor esforço (\textit{best-effort}), a infraestrutura de rede comporta-se como uma camada opaca: os pontos finais e os dispositivos de borda não dispõem de informações explícitas sobre as trajetórias disponíveis, tampouco conseguem selecionar ou auditar o caminho exato percorrido pelos fluxos \cite{trammell2022rfc, borges2024pot}. Como consequência, enlaces alternativos permanecem subutilizados, gargalos ocorrem em rotas padrão de menor salto e torna-se inviável assegurar garantias granulares de Qualidade de Serviço (QoS) conforme os requisitos específicos de cada aplicação \cite{wei2026panqosr}.
+
+Para superar essa assimetria entre a infraestrutura de transporte e as demandas das aplicações, emergem as Redes Cientes de Caminho (\textit{Path-Aware Networking} — PAN) \cite{trammell2022rfc, borges2024pot}. Conforme sistematizado pelo grupo de pesquisa PANRG (\textit{Path Aware Networking Research Group}) do IRTF, uma arquitetura PAN expõe as propriedades topológicas e de desempenho dos caminhos disponíveis aos sistemas finais ou aos nós de borda da rede, capacitando-os a selecionar ou influenciar ativamente as rotas que seus pacotes deverão atravessar \cite{trammell2022rfc, wei2026panqosr}. Em contraposição ao modelo convencional passivo, a consciência de caminho fundamenta-se em três propriedades arquiteturais essenciais \cite{borges2024pot}:
+\begin{itemize}
+    \item \textbf{Visibilidade (\textit{Visibility}):} capacidade de descobrir, mensurar e disponibilizar informações precisas sobre as características estáticas e dinâmicas dos caminhos (tais como latência, largura de banda residual, \textit{jitter} e perda de pacotes), frequentemente apoiada por mecanismos de telemetria de rede \cite{trammell2022rfc, borges2024pot}.
+    \item \textbf{Controlabilidade (\textit{Controllability}):} capacidade de selecionar explicitamente a trajetória de encaminhamento por fluxo ou classe de serviço, permitindo que decisões de engenharia de tráfego adaptem-se dinamicamente às políticas da aplicação e às condições instantâneas da rede \cite{borges2024pot, wei2026panqosr}.
+    \item \textbf{Verificabilidade (\textit{Verifiability}):} capacidade de atestar que os pacotes transitaram efetivamente pela sequência de nós autorizada, mitigando desvios não intencionais ou maliciosos e assegurando a conformidade com os Acordos de Nível de Serviço (SLAs) \cite{borges2024pot}.
+\end{itemize}
+
+A Tabela~\ref{tab:comparacao_pan} sintetiza as principais diferenças estruturais entre o paradigma tradicional de roteamento na Internet e a abordagem de Redes Cientes de Caminho.
+
+\begin{table}[htb]
+    \centering
+    \caption{Comparação entre o roteamento tradicional na Internet e as Redes Cientes de Caminho (PAN).}
+    \label{tab:comparacao_pan}
+    \begin{tabular}{p{3.2cm} p{5.3cm} p{5.5cm}}
+        \hline
+        \textbf{Característica} & \textbf{Roteamento Tradicional} & \textbf{Redes Cientes de Caminho (PAN)} \\
+        \hline
+        \textbf{Seleção de Caminho} & Implícita, salto a salto (\textit{hop-by-hop}), baseada em métricas estáticas de destino. & Explícita, controlada na origem ou na borda com base nos requisitos do fluxo. \\
+        \textbf{Visibilidade de Rota} & Infraestrutura opaca; diagnóstico indireto e limitado (e.g., \textit{traceroute}, SNMP). & Exposição de atributos de caminho e telemetria granular em tempo real. \\
+        \textbf{Adaptação e QoS} & Estática ou de convergência lenta; tratamento homogêneo de melhor esforço. & Dinâmica e orientada a políticas por classe de tráfego ou aplicação. \\
+        \textbf{Verificabilidade} & Ausente; sem garantias nativas sobre a trajetória percorrida no núcleo. & Suporte nativo à comprovação de trânsito e conformidade de políticas. \\
+        \hline
+    \end{tabular}
+    \fonte{Elaborado pelo autor (2026), adaptado de \textcite{trammell2022rfc, borges2024pot}.}
+\end{table}
+
+Apesar dos benefícios evidentes, a adoção prática de arquiteturas PAN enfrenta desafios técnicos e operacionais relevantes, documentados na RFC 9217 \cite{trammell2022rfc}. Entre os principais entraves destacam-se a definição de um vocabulário comum para expressar propriedades de caminho sem comprometer a privacidade topológica dos operadores, a escalabilidade na disseminação dessas métricas e o custo de manutenção de estado nos dispositivos intermediários \cite{trammell2022rfc, wei2026panqosr}. Iniciativas como a arquitetura SCION (\textit{Scalability, Control, and Isolation on Next-Generation Networks}) demonstram a viabilidade de redes PAN interdomínio ao agrupar sistemas autônomos em domínios de isolamento e delegar a seleção de caminhos aos pontos finais \cite{barrera2017scion, wei2026panqosr}. Contudo, soluções baseadas em implantação limpa (\textit{clean-slate}) exigem alterações profundas nas pilhas de protocolos dos hospedeiros, dificultando a adoção incremental em redes de produção \cite{wei2026panqosr}.
+
+Para viabilizar a implantação incremental sem modificar os sistemas finais, a literatura recente propõe deslocar a inteligência de consciência de caminho para os comutadores de borda (\textit{edge nodes} ou \textit{gateways}), combinando Redes Definidas por Software (SDN), telemetria e protocolos de Roteamento na Origem (\textit{Source Routing} — SR) \cite{dominicini2020, borges2024pot, wei2026panqosr}. Nesse contexto, o arcabouço PanQoSR \cite{wei2026panqosr} explora a disseminação de atributos de QoS de caminhos intra-AS e inter-AS para permitir que agentes na borda calculem rotas restritas a múltiplos objetivos (atraso, banda e perda) e as imponham por meio de \textit{Segment Routing}. De modo complementar, \textcite{puttaswamy2025pathaware} demonstram a transição de redes cientes de caminho para redes cientes de aplicação (\textit{Application-Aware Source Routing}), integrando classificação de tráfego na borda e escalonamento ponderado (\textit{Weighted Round-Robin} — WRR) nas filas de saída para atender classes heterogêneas de serviço.
+
+Sob essa perspectiva, o roteamento na origem baseado em Sistemas de Numeração de Resíduos (RNS) --- inaugurado pelo protocolo PolKA \cite{dominicini2020} e estendido para verificação de trânsito no PoT-PolKA \cite{borges2024pot} --- estabelece uma base matemática propícia para redes PAN de alto desempenho. Ao codificar a trajetória em um rótulo fixo inserido exclusivamente na borda, elimina-se a necessidade de manter tabelas de estado por fluxo ou de reescrever cabeçalhos nos comutadores de núcleo. Entretanto, para que uma rede ciente de caminho atenda plenamente a requisitos rigorosos de QoS em cenários com fluxos concorrentes, a simples seleção da rota (\textit{path steering}) revela-se insuficiente se não estiver acompanhada de isolamento de recursos nas filas de encaminhamento \cite{puttaswamy2025pathaware, wei2026panqosr}. É precisamente nessa lacuna que se insere o protocolo \nome, ao unificar a controlabilidade explícita de caminhos do roteamento na origem RNS com o provisionamento granular de filas de serviço sem estados no núcleo.
